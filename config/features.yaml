@@ -1,0 +1,119 @@
+# Feature Engine Configuration
+# Defines available feature engineering engines and their parameters
+
+engines:
+  # Basic Statistical Features Engine
+  basic_stats:
+    class: BasicStatsEngine
+    description: "Basic statistical transformations (log, sqrt, square, etc.)"
+    enabled: true
+    params:
+      include_log: true
+      include_sqrt: true  
+      include_square: true
+      include_reciprocal: false
+      clip_outliers: true
+      outlier_threshold: 3.0
+
+  # Rolling Statistics Engine
+  rolling_stats:
+    class: RollingStatsEngine
+    description: "Rolling window statistics (mean, std, min, max)"
+    enabled: false
+    params:
+      window_sizes: [3, 5, 10, 20]
+      statistics: ["mean", "std", "min", "max"]
+      center: false
+      min_periods: 1
+
+  # Lag Features Engine
+  lag_features:
+    class: LagFeaturesEngine
+    description: "Time-based lag features"
+    enabled: false
+    params:
+      lag_periods: [1, 2, 3, 5, 10]
+      include_diff: true
+      include_pct_change: true
+
+  # Polynomial Features Engine
+  polynomial:
+    class: PolynomialEngine
+    description: "Polynomial feature combinations"
+    enabled: false
+    params:
+      degree: 2
+      interaction_only: false
+      include_bias: false
+      max_features: 1000  # Limit to prevent explosion
+
+  # Feature Interactions Engine
+  interactions:
+    class: InteractionEngine
+    description: "Custom feature interactions (multiply, divide, add, subtract)"
+    enabled: false
+    params:
+      operations: ["multiply", "divide", "add", "subtract"]
+      max_combinations: 50
+      exclude_same_feature: true
+
+  # Binning/Discretization Engine
+  binning:
+    class: BinningEngine
+    description: "Convert continuous features to categorical bins"
+    enabled: false
+    params:
+      strategy: "quantile"  # Options: quantile, uniform, kmeans
+      n_bins: 10
+      encode: "ordinal"  # Options: ordinal, onehot
+
+# Preprocessing configuration
+preprocessing:
+  # Missing value handling
+  missing_values:
+    numeric_strategy: "median"  # Options: mean, median, mode, constant
+    categorical_strategy: "mode"  # Options: mode, constant
+    constant_value: "missing"
+    
+  # Outlier handling
+  outliers:
+    method: "iqr"  # Options: iqr, zscore, isolation_forest
+    threshold: 1.5  # For IQR method
+    action: "clip"  # Options: clip, remove, flag
+
+  # Scaling configuration
+  scaling:
+    method: "standard"  # Options: standard, minmax, robust, none
+    feature_range: [0, 1]  # For MinMaxScaler
+
+  # Encoding configuration
+  encoding:
+    categorical_method: "label"  # Options: label, onehot, target
+    handle_unknown: "ignore"
+    high_cardinality_threshold: 20
+
+# Feature selection configuration
+feature_selection:
+  enabled: false
+  methods:
+    - method: "variance_threshold"
+      threshold: 0.01
+    - method: "correlation_threshold" 
+      threshold: 0.95
+    - method: "mutual_info"
+      k_best: 50
+
+# Default engine selection for different data types
+defaults:
+  # Engines to enable by default for different scenarios
+  time_series: ["basic_stats", "rolling_stats", "lag_features"]
+  cross_sectional: ["basic_stats", "polynomial", "interactions"]
+  mixed: ["basic_stats", "interactions"]
+
+# Global feature engineering settings
+settings:
+  max_features: 5000  # Maximum number of features after engineering
+  feature_name_prefix: "feat_"
+  verbose: true
+  parallel_processing: true
+  n_jobs: -1 
