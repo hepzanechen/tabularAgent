@@ -132,6 +132,94 @@ training:
     regression: ["rmse", "mae", "r2"]
     classification: ["accuracy", "precision", "recall", "f1"]
 
+  # LightGBM Engine
+  lightgbm:
+    class: LightGBMModel
+    description: "LightGBM gradient boosting framework"
+    default_params:
+      n_estimators: 100
+      learning_rate: 0.1
+      max_depth: -1
+      num_leaves: 31
+      random_state: 42
+    
+    tuning:
+      method: "grid_search"
+      cv: 5
+      param_grid:
+        n_estimators: [50, 100, 200]
+        learning_rate: [0.05, 0.1, 0.2]
+        max_depth: [-1, 10, 20]
+        num_leaves: [15, 31, 63]
+
+  # XGBoost Engine
+  xgboost:
+    class: XGBoostModel
+    description: "XGBoost extreme gradient boosting"
+    default_params:
+      n_estimators: 100
+      learning_rate: 0.1
+      max_depth: 6
+      random_state: 42
+    
+    tuning:
+      method: "grid_search"
+      cv: 5
+      param_grid:
+        n_estimators: [50, 100, 200]
+        learning_rate: [0.05, 0.1, 0.2]
+        max_depth: [3, 6, 10]
+
+  # CatBoost Engine
+  catboost:
+    class: CatBoostModel
+    description: "CatBoost gradient boosting for categorical features"
+    default_params:
+      iterations: 100
+      learning_rate: 0.1
+      depth: 6
+      random_state: 42
+      verbose: false
+    
+    tuning:
+      method: "grid_search"
+      cv: 5
+      param_grid:
+        iterations: [50, 100, 200]
+        learning_rate: [0.05, 0.1, 0.2]
+        depth: [3, 6, 10]
+
+  # TabPFN Engine (classification only)
+  tabpfn:
+    class: TabPFNModel
+    description: "TabPFN transformer for small tabular datasets"
+    default_params:
+      device: "cpu"
+      N_ensemble_configurations: 32
+    
+    tuning:
+      method: "none"  # TabPFN doesn't support traditional hyperparameter tuning
+
+  # Neural Network Engine
+  neuralnet:
+    class: NeuralNetworkModel
+    description: "Multi-layer Perceptron neural network"
+    default_params:
+      hidden_layer_sizes: [100]
+      activation: "relu"
+      solver: "adam"
+      alpha: 0.0001
+      max_iter: 1000
+      random_state: 42
+    
+    tuning:
+      method: "grid_search"
+      cv: 5
+      param_grid:
+        hidden_layer_sizes: [[50], [100], [100, 50]]
+        activation: ["relu", "tanh"]
+        alpha: [0.0001, 0.001, 0.01]
+
 # Default engine selection
 defaults:
   regression: "sklearnRandomForest"

@@ -147,6 +147,17 @@ class ModelEngineFactory:
             except (ImportError, AttributeError):
                 pass
         
+        # Try to import from advanced_models for advanced ML classes
+        advanced_classes = ['LightGBMModel', 'XGBoostModel', 'CatBoostModel', 
+                          'TabPFNModel', 'NeuralNetworkModel', 'AutoSklearnModel', 
+                          'H2OModel', 'OptunaModel']
+        if class_name in advanced_classes:
+            try:
+                module_path = f"models.advanced_models"
+                module = importlib.import_module(module_path)
+                return getattr(module, class_name)
+            except (ImportError, AttributeError):
+                pass
 
         # Try generic model import
         try:
