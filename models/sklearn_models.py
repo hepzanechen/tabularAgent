@@ -90,6 +90,9 @@ class SklearnLinear(ModelEngine):
         params = {**self.get_default_params(), **kwargs}
         
         if problem_type == 'regression':
+            # LinearRegression doesn't use random_state (deterministic)
+            # Remove random_state if it exists in params
+            params.pop('random_state', None)
             return LinearRegression(**params)
         else:
             params['random_state'] = random_state
