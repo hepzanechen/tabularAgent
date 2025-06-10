@@ -80,41 +80,139 @@ class CatBoostModel(ModelEngine):
 
 
 class TabPFNModel(ModelEngine):
-    """TabPFN model engine - TabPFN only supports classification with specific constraints."""
+    """TabPFN model engine - TabPFN v2.0 supports both classification and regression with specific constraints."""
     
     def create_model(self, problem_type: str, random_state: int = 42, **kwargs):
-        """Create TabPFN model - only supports classification."""
+        """Create TabPFN model based on problem type."""
         try:
-            from tabpfn import TabPFNClassifier
+            from tabpfn import TabPFNClassifier, TabPFNRegressor
         except ImportError:
             raise ImportError("TabPFN not installed. Install with: pip install tabpfn")
         
-        if problem_type == 'regression':
-            raise ValueError("TabPFN only supports classification tasks")
-        
         params = {**self.get_default_params(), **kwargs}
-        # TabPFN has specific constraints - max 1000 samples, max 100 features
-        params['device'] = params.get('device', 'cpu')
-        params['N_ensemble_configurations'] = params.get('N_ensemble_configurations', 32)
         
-        return TabPFNClassifier(**params)
+        # Auto-detect and use GPU if available
+        if 'device' not in params:
+            params['device'] = self._auto_detect_device()
+        
+        print(f"🎯 TabPFN using device: {params['device']}")
+        
+        if problem_type == 'regression':
+            # Remove classification-specific parameters for regressor
+            regressor_params = {k: v for k, v in params.items() 
+                              if k not in ['N_ensemble_configurations']}
+            return TabPFNRegressor(**regressor_params)
+        else:
+            params['N_ensemble_configurations'] = params.get('N_ensemble_configurations', 32)
+            return TabPFNClassifier(**params)
+    
+    def _auto_detect_device(self):
+        """Automatically detect the best available device for TabPFN."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = 'cuda'
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"🚀 GPU detected: {gpu_name} ({gpu_memory:.1f}GB)")
+                
+                # Check if we have enough GPU memory (TabPFN needs ~2-8GB depending on dataset)
+                if gpu_memory >= 4.0:
+                    print("✅ Sufficient GPU memory for TabPFN")
+                    return device
+                else:
+                    print("⚠️ Limited GPU memory, using CPU as fallback")
+                    return 'cpu'
+            else:
+                print("💻 No GPU available, using CPU")
+                return 'cpu'
+        except ImportError:
+            print("⚠️ PyTorch not available for GPU detection, using CPU")
+            return 'cpu'
+        except Exception as e:
+            print(f"⚠️ GPU detection failed ({e}), using CPU")
+            return 'cpu'
+    
+    def _get_available_devices(self):
+        """Get list of available devices for TabPFN."""
+        available = ['cpu']  # CPU always available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # Check memory requirement
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                if gpu_memory >= 4.0:
+                    available.append('cuda')
+        except:
+            pass
+        return available
     
     def train(self, X_train: pd.DataFrame, y_train: pd.Series, 
               problem_type: str, random_state: int = 42, **custom_params):
-        """Train TabPFN with constraint checks."""
-        if problem_type == 'regression':
-            raise ValueError("TabPFN only supports classification tasks")
+        """Train TabPFN with constraint checks for both classification and regression."""
         
-        # Check TabPFN constraints
-        if len(X_train) > 1000:
-            print(f"⚠️ Warning: TabPFN works best with ≤1000 samples. Current: {len(X_train)}")
+        # Check TabPFN constraints (updated for v2.0)
+        if len(X_train) > 10000:
+            print(f"⚠️ Warning: TabPFN works best with ≤10,000 samples. Current: {len(X_train)}")
             print("Consider using a subset or different model.")
         
         if X_train.shape[1] > 100:
             print(f"⚠️ Warning: TabPFN works best with ≤100 features. Current: {X_train.shape[1]}")
             print("Consider feature selection or different model.")
         
+        print(f"🚀 Training TabPFN {problem_type} model with {len(X_train)} samples and {X_train.shape[1]} features")
+        
         return super().train(X_train, y_train, problem_type, random_state, **custom_params)
+    
+    def tune_hyperparameters(self, X_train: pd.DataFrame, y_train: pd.Series, 
+                           problem_type: str, random_state: int = 42):
+        """
+        TabPFN v2.0 has limited hyperparameter tuning options.
+        For regression: mainly device selection
+        For classification: device and N_ensemble_configurations
+        """
+        if not self.supports_tuning():
+            print("ℹ️ TabPFN: Using default parameters (limited tuning options)")
+            return self.train(X_train, y_train, problem_type, random_state)
+        
+        print("🎛️ Starting TabPFN hyperparameter tuning...")
+        
+        # TabPFN-specific parameter tuning
+        param_grid = self.tuning_config.get('param_grid', {})
+        
+        if problem_type == 'regression':
+            # For regression, mainly tune device (if GPU available)
+            simplified_grid = {k: v for k, v in param_grid.items() 
+                             if k in ['device']}
+        else:
+            # For classification, can tune device and ensemble configurations
+            simplified_grid = param_grid
+        
+        # Filter device options based on actual availability
+        if 'device' in simplified_grid:
+            available_devices = self._get_available_devices()
+            simplified_grid['device'] = [d for d in simplified_grid['device'] 
+                                       if d in available_devices]
+            if not simplified_grid['device']:
+                simplified_grid['device'] = ['cpu']  # Fallback
+        
+        if not simplified_grid:
+            print("ℹ️ No suitable parameters to tune for TabPFN")
+            return self.train(X_train, y_train, problem_type, random_state)
+        
+        print(f"🎛️ Tuning TabPFN parameters: {list(simplified_grid.keys())}")
+        
+        # Use parent tuning method with simplified grid
+        original_grid = self.tuning_config['param_grid']
+        self.tuning_config['param_grid'] = simplified_grid
+        
+        try:
+            best_model = super().tune_hyperparameters(X_train, y_train, problem_type, random_state)
+        finally:
+            # Restore original grid
+            self.tuning_config['param_grid'] = original_grid
+        
+        return best_model
 
 
 class NeuralNetworkModel(ModelEngine):
