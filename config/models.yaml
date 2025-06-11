@@ -190,16 +190,21 @@ engines:
       method: "limited"  # TabPFN v2.0 has limited hyperparameter options
       cv: 3  # Smaller CV due to TabPFN's speed
       param_grid:
-        device: ["cpu", "cuda"]  # Will auto-select best available
-        # For classification, can also tune:
-        # N_ensemble_configurations: [16, 32, 64] 
-        # For regression, fewer parameters available
+        device: ["cuda"]  # Will auto-select best available
+        N_ensemble_configurations: [16, 32, 64]  # For classification (ignored for regression)
+        # Note: N_ensemble_configurations only applies to classification
+        # Regression uses fewer tunable parameters
     
     constraints:
       max_samples: 10000  # Updated for v2.0
       max_features: 100
       recommended_samples: 1000  # Optimal performance range
       gpu_memory_requirement: "4GB"  # Minimum recommended GPU memory
+      
+    batch_settings:
+      enable_batching_threshold: 5000  # Enable batch prediction for datasets > 5000 samples
+      default_batch_size: 1000  # Default batch size for prediction
+      min_batch_size: 100  # Minimum batch size for error recovery
 
   # Neural Network Engine
   neuralnet:

@@ -149,20 +149,118 @@ class TabPFNModel(ModelEngine):
     
     def train(self, X_train: pd.DataFrame, y_train: pd.Series, 
               problem_type: str, random_state: int = 42, **custom_params):
-        """Train TabPFN with constraint checks for both classification and regression."""
+        """Train TabPFN with constraint checks and memory-efficient handling."""
         
         # Check TabPFN constraints (updated for v2.0)
         if len(X_train) > 10000:
             print(f"⚠️ Warning: TabPFN works best with ≤10,000 samples. Current: {len(X_train)}")
-            print("Consider using a subset or different model.")
+            print("💡 Consider using a subset or different model. Batch strategy enabled for prediction.")
         
         if X_train.shape[1] > 100:
             print(f"⚠️ Warning: TabPFN works best with ≤100 features. Current: {X_train.shape[1]}")
-            print("Consider feature selection or different model.")
+            print("💡 Consider feature selection or different model.")
         
         print(f"🚀 Training TabPFN {problem_type} model with {len(X_train)} samples and {X_train.shape[1]} features")
         
-        return super().train(X_train, y_train, problem_type, random_state, **custom_params)
+        # Create model with batch prediction wrapper
+        model = self.create_model(problem_type, random_state, **custom_params)
+        
+        # For large datasets, provide memory-efficient training
+        batch_threshold = self.config.get('batch_settings', {}).get('enable_batching_threshold', 5000)
+        if len(X_train) > batch_threshold:
+            print("🧠 Large dataset detected - enabling memory-efficient mode")
+            model = self._wrap_with_batch_prediction(model)
+        
+        model.fit(X_train, y_train)
+        return model
+    
+    def _wrap_with_batch_prediction(self, model):
+        """Wrap TabPFN model with batch prediction for memory efficiency."""
+        
+        # Get batch size from config
+        batch_size = self.config.get('batch_settings', {}).get('default_batch_size', 1000)
+        min_batch_size = self.config.get('batch_settings', {}).get('min_batch_size', 100)
+        
+        class BatchTabPFN:
+            """Wrapper for TabPFN with batch prediction capabilities."""
+            
+            def __init__(self, base_model, batch_size=batch_size, min_batch_size=min_batch_size):
+                self.base_model = base_model
+                self.batch_size = batch_size
+                self.min_batch_size = min_batch_size
+                self._is_fitted = False
+            
+            def fit(self, X, y):
+                """Fit the model normally."""
+                self.base_model.fit(X, y)
+                self._is_fitted = True
+                return self
+            
+            def predict(self, X):
+                """Predict in batches to avoid CUDA memory issues."""
+                if not self._is_fitted:
+                    raise ValueError("Model must be fitted before prediction")
+                
+                X_processed = np.asarray(X)
+                num_samples = X_processed.shape[0]
+                
+                # If small dataset, predict normally
+                if num_samples <= self.batch_size:
+                    return self.base_model.predict(X_processed)
+                
+                print(f"🔄 Predicting in batches of {self.batch_size} (total: {num_samples} samples)")
+                
+                y_pred_batches = []
+                for i in range(0, num_samples, self.batch_size):
+                    batch_end = min(i + self.batch_size, num_samples)
+                    batch = X_processed[i:batch_end]
+                    
+                    try:
+                        batch_pred = self.base_model.predict(batch)
+                        y_pred_batches.append(batch_pred)
+                    except Exception as e:
+                        print(f"⚠️ Batch prediction error at samples {i}-{batch_end}: {e}")
+                        # Try with smaller batch size
+                        smaller_batch_size = max(self.min_batch_size, self.batch_size // 2)
+                        print(f"🔄 Retrying with smaller batch size: {smaller_batch_size}")
+                        
+                        for j in range(i, batch_end, smaller_batch_size):
+                            small_batch_end = min(j + smaller_batch_size, batch_end)
+                            small_batch = X_processed[j:small_batch_end]
+                            small_batch_pred = self.base_model.predict(small_batch)
+                            y_pred_batches.append(small_batch_pred)
+                
+                # Concatenate all batch predictions
+                return np.concatenate(y_pred_batches)
+            
+            def predict_proba(self, X):
+                """Predict probabilities in batches (for classification)."""
+                if not hasattr(self.base_model, 'predict_proba'):
+                    raise AttributeError("Model does not support predict_proba")
+                
+                X_processed = np.asarray(X)
+                num_samples = X_processed.shape[0]
+                
+                if num_samples <= self.batch_size:
+                    return self.base_model.predict_proba(X_processed)
+                
+                print(f"🔄 Predicting probabilities in batches of {self.batch_size}")
+                
+                proba_batches = []
+                for i in range(0, num_samples, self.batch_size):
+                    batch_end = min(i + self.batch_size, num_samples)
+                    batch = X_processed[i:batch_end]
+                    batch_proba = self.base_model.predict_proba(batch)
+                    proba_batches.append(batch_proba)
+                
+                return np.concatenate(proba_batches)
+            
+            def __getattr__(self, name):
+                """Delegate other attributes to the base model."""
+                return getattr(self.base_model, name)
+        
+        import numpy as np
+        return BatchTabPFN(model)
     
     def tune_hyperparameters(self, X_train: pd.DataFrame, y_train: pd.Series, 
                            problem_type: str, random_state: int = 42):
@@ -181,12 +279,13 @@ class TabPFNModel(ModelEngine):
         param_grid = self.tuning_config.get('param_grid', {})
         
         if problem_type == 'regression':
-            # For regression, mainly tune device (if GPU available)
+            # For regression, mainly tune device (N_ensemble_configurations not applicable)
             simplified_grid = {k: v for k, v in param_grid.items() 
                              if k in ['device']}
         else:
             # For classification, can tune device and ensemble configurations
-            simplified_grid = param_grid
+            simplified_grid = {k: v for k, v in param_grid.items() 
+                             if k in ['device', 'N_ensemble_configurations']}
         
         # Filter device options based on actual availability
         if 'device' in simplified_grid:
